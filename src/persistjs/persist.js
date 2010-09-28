@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008 Paul Duncan (paul@pablotron.org)
+// Copyright (c) 2008, 2009 Paul Duncan (paul@pablotron.org)
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,38 +20,366 @@
 // THE SOFTWARE.
 //
 
+
+/* 
+ * The contents of gears_init.js; we need this because Chrome supports
+ * Gears out of the box, but still requires this constructor.  Note that
+ * if you include gears_init.js then this function does nothing.
+ */
+(function() {
+  // We are already defined. Hooray!
+  if (window.google && google.gears)
+    return;
+
+  // factory 
+  var F = null;
+
+  // Firefox
+  if (typeof GearsFactory != 'undefined') {
+    F = new GearsFactory();
+  } else {
+    // IE
+    try {
+      F = new ActiveXObject('Gears.Factory');
+      // privateSetGlobalObject is only required and supported on WinCE.
+      if (F.getBuildInfo().indexOf('ie_mobile') != -1)
+        F.privateSetGlobalObject(this);
+    } catch (e) {
+      // Safari
+      if ((typeof navigator.mimeTypes != 'undefined')
+           && navigator.mimeTypes["application/x-googlegears"]) {
+        F = document.createElement("object");
+        F.style.display = "none";
+        F.width = 0;
+        F.height = 0;
+        F.type = "application/x-googlegears";
+        document.documentElement.appendChild(F);
+      }
+    }
+  }
+
+  // *Do not* define any objects if Gears is not installed. This mimics the
+  // behavior of Gears defining the objects in the future.
+  if (!F)
+    return;
+
+  // Now set up the objects, being careful not to overwrite anything.
+  //
+  // Note: In Internet Explorer for Windows Mobile, you can't add properties to
+  // the window object. However, global objects are automatically added as
+  // properties of the window object in all browsers.
+  if (!window.google)
+    google = {};
+
+  if (!google.gears)
+    google.gears = {factory: F};
+})();
+
 /**
  * Persist - top-level namespace for Persist library.
+ * @namespace
  */
 Persist = (function() {
-  var VERSION = '0.1.0', P, B, esc, init, empty, ec;
+  var VERSION = '0.2.0', P, B, esc, init, empty, ec;
+  
+  ec = (function() {
+    var EPOCH = 'Thu, 01-Jan-1970 00:00:01 GMT',
+        // milliseconds per day
+        RATIO = 1000 * 60 * 60 * 24,
+        // keys to encode 
+        KEYS = ['expires', 'path', 'domain'],
+        // wrappers for common globals
+        esc = escape, un = unescape, doc = document,
+        me; 
 
-  // easycookie 0.2.1 (pre-minified)
-  // (see http://pablotron.org/software/easy_cookie/)
-  ec = (function(){var EPOCH='Thu, 01-Jan-1970 00:00:01 GMT',RATIO=1000*60*60*24,KEYS=['expires','path','domain'],esc=escape,un=unescape,doc=document,me;var get_now=function(){var r=new Date();r.setTime(r.getTime());return r;}
-var cookify=function(c_key,c_val){var i,key,val,r=[],opt=(arguments.length>2)?arguments[2]:{};r.push(esc(c_key)+'='+esc(c_val));for(i=0;i<KEYS.length;i++){key=KEYS[i];if(val=opt[key])
-r.push(key+'='+val);}
-if(opt.secure)
-r.push('secure');return r.join('; ');}
-var alive=function(){var k='__EC_TEST__',v=new Date();v=v.toGMTString();this.set(k,v);this.enabled=(this.remove(k)==v);return this.enabled;}
-me={set:function(key,val){var opt=(arguments.length>2)?arguments[2]:{},now=get_now(),expire_at,cfg={};if(opt.expires){opt.expires*=RATIO;cfg.expires=new Date(now.getTime()+opt.expires);cfg.expires=cfg.expires.toGMTString();}
-var keys=['path','domain','secure'];for(i=0;i<keys.length;i++)
-if(opt[keys[i]])
-cfg[keys[i]]=opt[keys[i]];var r=cookify(key,val,cfg);doc.cookie=r;return val;},has:function(key){key=esc(key);var c=doc.cookie,ofs=c.indexOf(key+'='),len=ofs+key.length+1,sub=c.substring(0,key.length);return((!ofs&&key!=sub)||ofs<0)?false:true;},get:function(key){key=esc(key);var c=doc.cookie,ofs=c.indexOf(key+'='),len=ofs+key.length+1,sub=c.substring(0,key.length),end;if((!ofs&&key!=sub)||ofs<0)
-return null;end=c.indexOf(';',len);if(end<0)
-end=c.length;return un(c.substring(len,end));},remove:function(k){var r=me.get(k),opt={expires:EPOCH};doc.cookie=cookify(k,'',opt);return r;},keys:function(){var c=doc.cookie,ps=c.split('; '),i,p,r=[];for(i=0;i<ps.length;i++){p=ps[i].split('=');r.push(un(p[0]));}
-return r;},all:function(){var c=doc.cookie,ps=c.split('; '),i,p,r=[];for(i=0;i<ps.length;i++){p=ps[i].split('=');r.push([un(p[0]),un(p[1])]);}
-return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}());
+    // private methods
+
+    /*
+     * Get the current time.
+     *
+     * This method is private.
+     */
+    var get_now = function() {
+      var r = new Date();
+      r.setTime(r.getTime());
+      return r;
+    }
+
+    /*
+     * Convert the given key/value pair to a cookie.
+     *
+     * This method is private.
+     */
+    var cookify = function(c_key, c_val /*, opt */) {
+       var i, key, val, r = [],
+           opt = (arguments.length > 2) ? arguments[2] : {};
+
+      // add key and value
+      r.push(esc(c_key) + '=' + esc(c_val));
+
+      // iterate over option keys and check each one
+      for (i = 0; i < KEYS.length; i++) {
+        key = KEYS[i];
+        if (val = opt[key])
+          r.push(key + '=' + val);
+      }
+
+      // append secure (if specified)
+      if (opt.secure)
+        r.push('secure');
+
+      // build and return result string
+      return r.join('; ');
+    }
+
+    /*
+     * Check to see if cookies are enabled.
+     *
+     * This method is private.
+     */
+    var alive = function() {
+      var k = '__EC_TEST__', 
+          v = new Date();
+
+      // generate test value
+      v = v.toGMTString();
+
+      // set test value
+      this.set(k, v);
+
+      // return cookie test
+      this.enabled = (this.remove(k) == v);
+      return this.enabled;
+    }
+
+    // public methods
+
+    // build return object
+    me = {
+      /*
+       * Set a cookie value.
+       *
+       * Examples:
+       *
+       *   // simplest-case
+       *   EasyCookie.set('test_cookie', 'test_value');
+       *
+       *   // more complex example
+       *   EasyCookie.set('test_cookie', 'test_value', {
+       *     // expires in 13 days
+       *     expires: 13,
+       *
+       *     // restrict to given domain
+       *     domain: 'foo.example.com',
+       *
+       *     // restrict to given path
+       *     path: '/some/path',
+       *
+       *     // secure cookie only
+       *     secure: true
+       *   });
+       *
+       */
+      set: function(key, val /*, opt */) {
+        var opt = (arguments.length > 2) ? arguments[2] : {}, 
+            now = get_now(),
+            expire_at,
+            cfg = {};
+
+        // if expires is set, convert it from days to milliseconds
+        if (opt.expires) {
+          // Needed to assign to a temporary variable because of pass by reference issues
+          var expires = opt.expires * RATIO;
+
+          // set cookie expiration date
+          cfg.expires = new Date(now.getTime() + expires);
+          cfg.expires = cfg.expires.toGMTString();
+        }
+
+        // set remaining keys
+        var keys = ['path', 'domain', 'secure'];
+        for (i = 0; i < keys.length; i++)
+          if (opt[keys[i]])
+            cfg[keys[i]] = opt[keys[i]];
+
+        var r = cookify(key, val, cfg);
+        doc.cookie = r;
+
+        return val;
+      },
+
+      /*
+       * Check to see if the given cookie exists.
+       *
+       * Example:
+       *
+       *   val = EasyCookie.get('test_cookie');
+       *
+       */
+      has: function(key) {
+        key = esc(key);
+
+        var c = doc.cookie,
+            ofs = c.indexOf(key + '='),
+            len = ofs + key.length + 1,
+            sub = c.substring(0, key.length);
+
+        // check to see if key exists
+        return ((!ofs && key != sub) || ofs < 0) ? false : true;
+      },
+
+      /*
+       * Get a cookie value.
+       *
+       * Example:
+       *
+       *   val = EasyCookie.get('test_cookie');
+       *
+       */
+      get: function(key) {
+        key = esc(key);
+
+        var c = doc.cookie, 
+            ofs = c.indexOf(key + '='),
+            len = ofs + key.length + 1,
+            sub = c.substring(0, key.length),
+            end;
+
+        // check to see if key exists
+        if ((!ofs && key != sub) || ofs < 0)
+          return null;
+
+        // grab end of value
+        end = c.indexOf(';', len);
+        if (end < 0) 
+          end = c.length;
+
+        // return unescaped value
+        return un(c.substring(len, end));
+      },
+
+      /*
+       * Remove a preset cookie.  If the cookie is already set, then
+       * return the value of the cookie.
+       *
+       * Example:
+       *
+       *   old_val = EasyCookie.remove('test_cookie');
+       *
+       */
+      remove: function(k) {
+        var r = me.get(k), 
+            opt = { expires: EPOCH };
+
+        // delete cookie
+        doc.cookie = cookify(k, '', opt);
+
+        // return value
+        return r;
+      },
+
+      /*
+       * Get a list of cookie names.
+       *
+       * Example:
+       *
+       *   // get all cookie names
+       *   cookie_keys = EasyCookie.keys();
+       *
+       */
+      keys: function() {
+        var c = doc.cookie, 
+            ps = c.split('; '),
+            i, p, r = [];
+
+        // iterate over each key=val pair and grab the key
+        for (i = 0; i < ps.length; i++) {
+          p = ps[i].split('=');
+          r.push(un(p[0]));
+        }
+
+        // return results
+        return r;
+      },
+
+      /*
+       * Get an array of all cookie key/value pairs.
+       *
+       * Example:
+       *
+       *   // get all cookies
+       *   all_cookies = EasyCookie.all();
+       *
+       */
+      all: function() {
+        var c = doc.cookie, 
+            ps = c.split('; '),
+            i, p, r = [];
+
+        // iterate over each key=val pair and grab the key
+        for (i = 0; i < ps.length; i++) {
+          p = ps[i].split('=');
+          r.push([un(p[0]), un(p[1])]);
+        }
+
+        // return results
+        return r;
+      },
+
+      /* 
+       * Version of EasyCookie
+       */
+      version: '0.2.1',
+
+      /*
+       * Are cookies enabled?
+       *
+       * Example:
+       *
+       *   have_cookies = EasyCookie.enabled
+       *
+       */
+      enabled: false
+    };
+
+    // set enabled attribute
+    me.enabled = alive.call(me);
+
+    // return self
+    return me;
+  }());
+  
+  // wrapper for Array.prototype.indexOf, since IE doesn't have it
+  var index_of = (function() {
+    if (Array.prototype.indexOf)
+      return function(ary, val) { 
+        return Array.prototype.indexOf.call(ary, val);
+      };
+    else
+      return function(ary, val) {
+        var i, l;
+
+        for (i = 0, l = ary.length; i < l; i++)
+          if (ary[i] == val)
+            return i;
+
+        return -1;
+      };
+  })();
+
 
   // empty function
   empty = function() { };
 
-  // escape spaces in name
+  /**
+   * Escape spaces and underscores in name.  Used to generate a "safe"
+   * key from a name.
+   *
+   * @private
+   */
   esc = function(str) {
     return 'PS' + str.replace(/_/g, '__').replace(/ /g, '_s');
   };
-
-
 
   C = {
     /* 
@@ -61,17 +389,15 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
      * listed in order of capacity, and many browsers
      * support multiple backends, so changing the search order could
      * result in a browser choosing a less capable backend.
-     * 
      */ 
     search_order: [
       // TODO: air
-      'gears',
       'localstorage',
-      'whatwg_db', 
       'globalstorage', 
-      'flash',
+      'gears',
+      'cookie',
       'ie', 
-      'cookie'
+      'flash'
     ],
 
     // valid name regular expression
@@ -84,7 +410,8 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
       'set', 
       'remove', 
       'load', 
-      'save'
+      'save',
+      'iterate'
       // TODO: clear method?
     ],
 
@@ -92,10 +419,13 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
     sql: {
       version:  '1', // db schema version
 
+      // XXX: the "IF NOT EXISTS" is a sqlite-ism; fortunately all the 
+      // known DB implementations (safari and gears) use sqlite
       create:   "CREATE TABLE IF NOT EXISTS persist_data (k TEXT UNIQUE NOT NULL PRIMARY KEY, v TEXT NOT NULL)",
       get:      "SELECT v FROM persist_data WHERE k = ?",
       set:      "INSERT INTO persist_data(k, v) VALUES (?, ?)",
-      remove:   "DELETE FROM persist_data WHERE k = ?" 
+      remove:   "DELETE FROM persist_data WHERE k = ?",
+      keys:     "SELECT * FROM persist_data"
     },
 
     // default flash configuration
@@ -119,7 +449,7 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
 
   // built-in backends
   B = {
-    // gears db backend (webkit, Safari 3.1+)
+    // gears db backend
     // (src: http://code.google.com/apis/gears/api_database.html)
     gears: {
       // no known limit
@@ -131,18 +461,6 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
       },
 
       methods: {
-        transaction: function(fn) {
-          var db = this.db;
-
-          // begin transaction
-          db.execute('BEGIN').close();
-
-          // call callback fn
-          fn.call(this, db);
-
-          // commit changes
-          db.execute('COMMIT').close();
-        },
 
         init: function() {
           var db;
@@ -158,222 +476,93 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
           // excluding the following characters:
           //
           //   / \ : * ? " < > | ; ,
+          //
+          // (this constraint is enforced in the Store constructor)
           db.open(esc(this.name));
 
           // create table
           db.execute(C.sql.create).close();
         },
 
-        get: function(key, fn, scope) {
+        get: function(key ) {
           var r, sql = C.sql.get;
-
-          // if callback isn't defined, then return
-          if (!fn)
-            return;
+          var db = this.db;
+          var ret;
 
           // begin transaction
-          this.transaction(function (t) {
-            // exec query
-            r = t.execute(sql, [key]);
+          db.execute('BEGIN').close();
 
-            // call callback
-            if (r.isValidRow())
-              fn.call(scope || this, true, r.field(0));
-            else
-              fn.call(scope || this, false, null);
+          // exec query
+          r = db.execute(sql, [key]);
 
-            // close result set
-            r.close();
-          });
+          // check result and get value
+          ret = r.isValidRow() ? r.field(0) : null;
+
+          // close result set
+          r.close();
+
+          // commit changes
+          db.execute('COMMIT').close();
+          return ret;
         },
 
-        set: function(key, val, fn, scope) {
+        set: function(key, val ) {
           var rm_sql = C.sql.remove,
               sql    = C.sql.set, r;
-
-          // begin set transaction
-          this.transaction(function(t) {
-            // exec remove query
-            t.execute(rm_sql, [key]).close();
-
-            // exec set query
-            t.execute(sql, [key, val]).close();
-            
-            // run callback
-            if (fn)
-              fn.call(scope || this, true, val);
-          });
-        },
-
-        // begin remove transaction
-        remove: function(key, fn, scope) {
-          var get_sql = C.sql.get;
-              sql = C.sql.remove,
-              r, val;
-
-          this.transaction(function(t) {
-            // if a callback was defined, then get the old
-            // value before removing it
-            if (fn) {
-              // exec get query
-              r = t.execute(get_sql, [key]);
-
-              if (r.isValidRow()) {
-                // key exists, get value 
-                val = r.field(0);
-
-                // exec remove query
-                t.execute(sql, [key]).close();
-
-                // exec callback
-                fn.call(scope || this, true, val);
-              } else {
-                // key does not exist, exec callback
-                fn.call(scope || this, false, null);
-              }
-
-              // close result set
-              r.close();
-            } else {
-              // no callback was defined, so just remove the
-              // data without checking the old value
-
-              // exec remove query
-              t.execute(sql, [key]).close();
-            }
-          });
-        } 
-      }
-    }, 
-
-    // whatwg db backend (webkit, Safari 3.1+)
-    // (src: whatwg and http://webkit.org/misc/DatabaseExample.html)
-    whatwg_db: {
-      size:   200 * 1024,
-
-      test: function() {
-        var name = 'PersistJS Test', 
-            desc = 'Persistent database test.';
-
-        // test for openDatabase
-        if (!window.openDatabase)
-          return false;
-
-        // make sure openDatabase works
-        // XXX: will this leak a db handle and/or waste space?
-        if (!window.openDatabase(name, C.sql.version, desc, B.whatwg_db.size))
-          return false;
-
-        return true;
-      },
-
-      methods: {
-        transaction: function(fn) {
-          if (!this.db_created) {
-            var sql = C.sql.create;
-
-            this.db.transaction(function(t) {
-              // create table
-              t.executeSql(sql, [], function() {
-                this.db_created = true;
-              });
-            }, empty); // trap exception
-          } 
-
-          this.db.transaction(fn);
-        },
-
-        init: function() {
-          var desc, size; 
-          
-          // init description and size
-          desc = this.o.about || "Persistent storage for " + this.name;
-          size = this.o.size || B.whatwg_db.size;
-
-          // create database handle
-          this.db = openDatabase(this.name, C.sql.version, desc, size);
-        },
-
-        get: function(key, fn, scope) {
-          var sql = C.sql.get;
-
-          // if callback isn't defined, then return
-          if (!fn)
-            return;
-
-          // get callback scope
-          scope = scope || this;
+          var db = this.db;
+          var ret;
 
           // begin transaction
-          this.transaction(function (t) {
-            t.executeSql(sql, [key], function(t, r) {
-              if (r.rows.length > 0)
-                fn.call(scope, true, r.rows.item(0)['v']);
-              else
-                fn.call(scope, false, null);
-            });
-          });
-        },
+          db.execute('BEGIN').close();
 
-        set: function(key, val, fn, scope) {
-          var rm_sql = C.sql.remove,
-              sql    = C.sql.set;
+          // exec remove query
+          db.execute(rm_sql, [key]).close();
 
-          // begin set transaction
-          this.transaction(function(t) {
-            // exec remove query
-            t.executeSql(rm_sql, [key], function() {
-              // exec set query
-              t.executeSql(sql, [key, val], function(t, r) {
-                // run callback
-                if (fn)
-                  fn.call(scope || this, true, val);
-              });
-            });
-          });
+          // exec set query
+          db.execute(sql, [key, val]).close();
+
+          // commit changes
+          db.execute('COMMIT').close();
 
           return val;
         },
 
-        // begin remove transaction
-        remove: function(key, fn, scope) {
+        remove: function(key ) {
           var get_sql = C.sql.get;
-              sql = C.sql.remove;
+              sql = C.sql.remove,
+              r, val = null, is_valid = false;
+          var db = this.db;
 
-          this.transaction(function(t) {
-            // if a callback was defined, then get the old
-            // value before removing it
-            if (fn) {
-              // exec get query
-              t.executeSql(get_sql, [key], function(t, r) {
-                if (r.rows.length > 0) {
-                  // key exists, get value 
-                  var val = r.rows.item(0)['v'];
+          // begin transaction
+          db.execute('BEGIN').close();
 
-                  // exec remove query
-                  t.executeSql(sql, [key], function(t, r) {
-                    // exec callback
-                    fn.call(scope || this, true, val);
-                  });
-                } else {
-                  // key does not exist, exec callback
-                  fn.call(scope || this, false, null);
-                }
-              });
-            } else {
-              // no callback was defined, so just remove the
-              // data without checking the old value
+          // exec remove query
+          db.execute(sql, [key]).close();
 
-              // exec remove query
-              t.executeSql(sql, [key]);
-            }
-          });
-        } 
+          // commit changes
+          db.execute('COMMIT').close();
+
+          return true;
+        },
+        iterate: function(fn,scope) {
+          var key_sql = C.sql.keys;
+          var r;
+          var db = this.db;
+
+          // exec keys query
+          r = db.execute(key_sql);
+          while (r.isValidRow()) {
+            fn.call(scope || this, r.field(0), r.field(1));
+            r.next();
+          }
+          r.close();
+        }
       }
     }, 
-    
+
     // globalstorage backend (globalStorage, FF2+, IE8+)
     // (src: http://developer.mozilla.org/en/docs/DOM:Storage#globalStorage)
+    // https://developer.mozilla.org/En/DOM/Storage
     //
     // TODO: test to see if IE8 uses object literal semantics or
     // getItem/setItem/removeItem semantics
@@ -394,26 +583,24 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
           this.store = globalStorage[this.o.domain];
         },
 
-        get: function(key, fn, scope) {
+        get: function(key ) {
           // expand key
           key = this.key(key);
 
-          if (fn)
-            fn.call(scope || this, true, this.store.getItem(key));
+          return  this.store.getItem(key);
         },
 
-        set: function(key, val, fn, scope) {
+        set: function(key, val ) {
           // expand key
           key = this.key(key);
 
           // set value
           this.store.setItem(key, val);
 
-          if (fn)
-            fn.call(scope || this, true, val);
+          return val;
         },
 
-        remove: function(key, fn, scope) {
+        remove: function(key ) {
           var val;
 
           // expand key
@@ -425,16 +612,18 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
           // delete value
           this.store.removeItem(key);
 
-          if (fn)
-            fn.call(scope || this, (val !== null), val);
+          return val;
         } 
       }
     }, 
     
     // localstorage backend (globalStorage, FF2+, IE8+)
     // (src: http://www.whatwg.org/specs/web-apps/current-work/#the-localstorage)
+    // also http://msdn.microsoft.com/en-us/library/cc197062(VS.85).aspx#_global
     localstorage: {
       // (unknown?)
+      // ie has the remainingSpace property, see:
+      // http://msdn.microsoft.com/en-us/library/cc197016(VS.85).aspx
       size: -1,
 
       test: function() {
@@ -443,49 +632,56 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
 
       methods: {
         key: function(key) {
-          return esc(this.name) + esc(key);
+          return this.name + '>' + key ;
+          //return esc(this.name) + esc(key);
         },
 
         init: function() {
           this.store = localStorage;
         },
 
-        get: function(key, fn, scope) {
+        get: function(key ) {
           // expand key
           key = this.key(key);
-
-          if (fn)
-            fn.call(scope || this, true, this.store.getItem(key));
+          return this.store.getItem(key);
         },
 
-        set: function(key, val, fn, scope) {
+        set: function(key, val ) {
           // expand key
           key = this.key(key);
 
           // set value
           this.store.setItem(key, val);
 
-          if (fn)
-            fn.call(scope || this, true, val);
+          return val;
         },
 
-        remove: function(key, fn, scope) {
+        remove: function(key) {
           var val;
 
           // expand key
           key = this.key(key);
 
           // get value
-          val = this.getItem(key);
+          val = this.store.getItem(key);
 
           // delete value
           this.store.removeItem(key);
 
-          if (fn)
-            fn.call(scope || this, (val !== null), val);
-        } 
-      }
-    }, 
+          return val;
+        },
+
+        iterate : function(fn, scope) {
+          var l = this.store;
+          for (var i = 0; i < l.length; i++) {
+              var keys = l.key(i).split('>');
+              if ((keys.length == 2) && (keys[0] == this.name)) {
+                fn.call(scope || this,keys[1], l[l.key(i)]);
+              }
+          }
+        }
+    }
+    },
     
     // IE backend
     ie: {
@@ -505,9 +701,11 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
         var el = document.createElement('div');
 
         // set element properties
+        // http://msdn.microsoft.com/en-us/library/ms531424(VS.85).aspx 
+        // http://www.webreference.com/js/column24/userdata.html
         el.id = id;
         el.style.display = 'none';
-        el.addBehavior('#default#userData');
+        el.addBehavior('#default#userdata');
 
         // append element to body
         document.body.appendChild(el);
@@ -528,7 +726,7 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
             this.load();
         },
 
-        get: function(key, fn, scope) {
+        get: function(key) {
           var val;
 
           // expand key
@@ -541,12 +739,11 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
           // get value
           val = this.el.getAttribute(key);
 
-          // call fn
-          if (fn)
-            fn.call(scope || this, val ? true : false, val);
+          return val;
+
         },
 
-        set: function(key, val, fn, scope) {
+        set: function(key, val) {
           // expand key
           key = esc(key);
           
@@ -557,9 +754,29 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
           if (!this.o.defer)
             this.save();
 
-          // call fn
-          if (fn)
-            fn.call(scope || this, true, val);
+          return val;
+
+        },
+
+        remove: function(key ) {
+          var val;
+
+          // expand key
+          key = esc(key);
+
+          // load data
+          if (!this.o.defer)
+            this.load();
+
+          // get old value and remove attribute
+          val = this.el.getAttribute(key);
+          this.el.removeAttribute(key);
+
+          // save data
+          if (!this.o.defer)
+            this.save();
+
+          return val;
         },
 
         load: function() {
@@ -591,42 +808,38 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
           return this.name + B.cookie.delim + key;
         },
 
-        get: function(key, val, fn, scope) {
+        get: function(key, fn ) {
+          var val;
+          
           // expand key 
           key = this.key(key);
 
           // get value
           val = ec.get(key);
 
-          // call fn
-          if (fn)
-            fn.call(scope || this, val != null, val);
+          return val;
         },
 
-        set: function(key, val, fn, scope) {
+        set: function(key, val, fn ) {
           // expand key 
           key = this.key(key);
 
           // save value
           ec.set(key, val, this.o);
 
-          // call fn
-          if (fn)
-            fn.call(scope || this, true, val);
+          return val;
         },
 
-        remove: function(key, val, fn, scope) {
+        remove: function(key, val ) {
           var val;
 
           // expand key 
           key = this.key(key);
 
           // remove cookie
-          val = ec.remove(key)
+          val = ec.remove(key);
 
-          // call fn
-          if (fn)
-            fn.call(scope || this, val != null, val);
+          return val;
         } 
       }
     },
@@ -637,7 +850,7 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
     flash: {
       test: function() {
         // TODO: better flash detection
-        if (!window.SWFObject || !deconcept || !deconcept.SWFObjectUtil)
+        if (!deconcept || !deconcept.SWFObjectUtil)
           return false;
 
         // get the major version
@@ -663,7 +876,7 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
             document.body.appendChild(el);
 
             // create new swf object
-            o = new SWFObject(this.o.swf_path || cfg.path, cfg.id, cfg.size.w, cfg.size.h, '8');
+            o = new deconcept.SWFObject(this.o.swf_path || cfg.path, cfg.id, cfg.size.w, cfg.size.h, '8');
 
             // set parameters
             for (key in cfg.args)
@@ -680,7 +893,7 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
           this.el = B.flash.el;
         },
 
-        get: function(key, fn, scope) {
+        get: function(key ) {
           var val;
 
           // escape key
@@ -689,12 +902,10 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
           // get value
           val = this.el.get(this.name, key);
 
-          // call handler
-          if (fn)
-            fn.call(scope || this, val !== null, val);
+          return val;
         },
 
-        set: function(key, val, fn, scope) {
+        set: function(key, val ) {
           var old_val;
 
           // escape key
@@ -703,12 +914,10 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
           // set value
           old_val = this.el.set(this.name, key, val);
 
-          // call handler
-          if (fn)
-            fn.call(scope || this, true, val);
+          return old_val;
         },
 
-        remove: function(key, fn, scope) {
+        remove: function(key ) {
           var val;
 
           // get key
@@ -716,16 +925,17 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
 
           // remove old value
           val = this.el.remove(this.name, key);
+          return val;
 
-          // call handler
-          if (fn)
-            fn.call(scope || this, true, val);
         }
       }
     }
   };
 
-  // init function
+  /**
+   * Test for available backends and pick the best one.
+   * @private
+   */
   var init = function() {
     var i, l, b, key, fns = C.methods, keys = C.search_order;
 
@@ -746,7 +956,6 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
         // found backend, save type and size
         P.type = keys[i];
         P.size = b.size;
-
         // extend store prototype with backend methods
         for (key in b.methods)
           P.Store.prototype[key] = b.methods[key];
@@ -766,7 +975,7 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
     type: null,
     size: 0,
 
-    // expose init function
+    // XXX: expose init function?
     // init: init,
 
     add: function(o) {
@@ -781,7 +990,7 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
     },
 
     remove: function(id) {
-      var ofs = C.search_order.indexOf(id);
+      var ofs = index_of(C.search_order, id);
       if (ofs < 0)
         return;
 
@@ -814,8 +1023,23 @@ return r;},version:'0.2.1',enabled:false};me.enabled=alive.call(me);return me;}(
       o = o || {};
       this.name = name;
 
-      // get domain (XXX: does this localdomain fix work?)
-      o.domain = o.domain || location.hostname || 'localhost.localdomain';
+      // get domain (XXX: does this localdomain fix work?)      
+      o.domain = o.domain || location.hostname || 'localhost';
+      
+      // strip port from domain (XXX: will this break ipv6?)
+      o.domain = o.domain.replace(/:\d+$/, '')
+      
+      // Specifically for IE6 and localhost
+      o.domain = (o.domain == 'localhost') ? '' : o.domain;
+
+      // append localdomain to domains w/o '."
+      // (see https://bugzilla.mozilla.org/show_bug.cgi?id=357323)
+      // (file://localhost/ works, see: 
+      // https://bugzilla.mozilla.org/show_bug.cgi?id=469192)
+/* 
+ *       if (!o.domain.match(/\./))
+ *         o.domain += '.localdomain';
+ */ 
 
       this.o = o;
 

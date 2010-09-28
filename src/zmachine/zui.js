@@ -178,55 +178,73 @@ parchment.lib.ZUI = Object.subClass({
                 line = line.toLowerCase();
                 if (line.length == 0)
                     line = null;
-                else if (line != "url")
+                else if (line != "url" && line != "list" && !line.match(/delete\s+(.*?)\s*$/))
                     line = self.library.url + "/" + line;
                 callback(line);
             });
         },
         
-    onSave: function(data, callback) {
-      var self = this;
-      var b64data = file.base64_encode(data);
+        onSave: function(data, callback) {
+          var self = this;
+          var b64data = file.base64_encode(data);
 
-      self.onPrint("Saved game name> ");
-      self._savedGameInput(function(filename) {
-          if (!filename) {
-              callback(false);
-          } else if (filename == "url") {
-              if (window.globalStorage && location.href.slice(0, 5) != 'file:') {
-                  var saveKey = self.library.url + '_saveData';
-                  window.globalStorage[location.hostname][saveKey] = b64data;
-              }
-
-              // Something very strange happens with local files on windows... perhaps it's because the url has the drive letter?
-              // Anyway, we have to make our own location string
-              location = location.protocol + '//' + location.host + location.pathname + location.search + '#' + b64data;
-              self._expectedHash = location.hash;
-
-              self.onPrint("Your game has been saved to the URL. You may want " +
-              "to bookmark this page now; just reload it at any " +
-              "time to restore your game from this point.\n");
-              callback(true);
-          } else {
-              self._store.set(filename, b64data);
-              self._store.get(filename, function(ok, rdata) {
-                  rdata = new String(rdata);
-                  if (ok && (b64data == rdata)) {
-                      callback(true);
-                  } else {
-                      self._store.remove(filename);
-                      callback(false);
+          self.onPrint("\n  Gamefile> ");
+          self._savedGameInput(function(filename) {
+              if (!filename) {
+                  callback(false);
+              } else if (filename == "url") {
+                  if (window.globalStorage && location.href.slice(0, 5) != 'file:') {
+                      var saveKey = self.library.url + '_saveData';
+                      window.globalStorage[location.hostname][saveKey] = b64data;
                   }
-              });
-          }
-      });
-	},
+
+                  // Something very strange happens with local files on windows... perhaps it's because the url has the drive letter?
+                  // Anyway, we have to make our own location string
+                  location = location.protocol + '//' + location.host + location.pathname + location.search + '#' + b64data;
+                  self._expectedHash = location.hash;
+
+                  self.onPrint("Your game has been saved to the URL. You may want " +
+                  "to bookmark this page now; just reload it at any " +
+                  "time to restore your game from this point.\n");
+                  callback(true);
+              } else if (filename == "list") {
+                  self.onPrint("  ");
+                  self._store.iterate(function(a,b) {
+                    var reptext = a.replace(self.library.url + "/", "");
+                    if (reptext != a)
+                      self.onPrint(reptext + " ");
+                  });
+                  self.onPrint("\n");
+                  self.onSave(data, callback);
+              } else if (filename.match(/delete\s+(.*?)\s*$/)) {
+                  if (self._store.remove(self.library.url + "/" + RegExp.$1)) {
+                      self.onPrint("  '" + RegExp.$1 + "'" + " removed.\n");
+                  }
+                  self.onSave(data, callback);
+              } else {
+                  self._store.set(filename, b64data);
+                  var rdata = self._store.get(filename);
+
+                  if (rdata) {
+                    rdata = new String(rdata);
+                    if (b64data == rdata) {
+                        callback(true);
+                    } else {
+                        self._store.remove(filename);
+                        callback(false);
+                    }
+                  } else {
+                    callback(false);
+                  }
+                }
+            });
+    	},
 
     onRestore: function(callback)
     {
     	var self = this;
     	
-        self.onPrint("Saved game name> ");
+        self.onPrint("\n  Gamefile> ");
         self._savedGameInput(function(filename) {
             if (!filename) {
                 callback(false);
@@ -250,16 +268,29 @@ parchment.lib.ZUI = Object.subClass({
                 	else
                 		callback(null);
                 }
-            } else {
-                self._store.get(filename, function(ok, data) {
-                    data = new String(data);
-                    if (!ok) {
-                        self.onPrint("failure to retrieve\n");
-                        callback(null);
-                    } else {
-                        callback(file.base64_decode(data));
-                    }
+            } else if (filename == "list") {
+                self.onPrint("  ");
+                self._store.iterate(function(a,b) {
+                  var reptext = a.replace(self.library.url + "/", "");
+                  if (reptext != a)
+                    self.onPrint(reptext + " ");
                 });
+                self.onPrint("\n");
+                self.onRestore(callback);
+            } else if (filename.match(/delete\s+(.*?)\s*$/)) {
+                if (self._store.remove(self.library.url + "/" + RegExp.$1)) {
+                    self.onPrint("  '" + RegExp.$1 + "'" + " removed.\n");
+                }
+                self.onRestore(callback);
+            } else {
+                var data = self._store.get(filename);
+                if (data) {
+                  data = new String(data);
+                  callback(file.base64_decode(data));
+                } else {
+                  self.onPrint("failure to retrieve\n");
+                  callback(null);
+                } 
             }
         });
     },
