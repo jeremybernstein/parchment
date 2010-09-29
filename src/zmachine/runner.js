@@ -122,41 +122,60 @@ function EngineRunner(engine, zui, logfunc) {
       }
     },
 
+    // _receiveLineInput: function(input) {
+    //   self._isWaitingForCallback = false;
+    // 
+    //   // For now we'll say that a carriage return is the
+    //   // terminating character, because we don't actually support
+    //   // other terminating characters.
+    //   self._engine.answer(0, 13);
+    // 
+    //   self._engine.answer(1, input);
+    //   if (!self._isInLoop) {
+    //     self._continueRunning();
+    //   } else {
+    //     /* We're still inside _loop(), so just return. */
+    //   }
+    // },
+    // 
+    // _receiveCharacterInput: function(input) {
+    //   self._isWaitingForCallback = false;
+    //   self._engine.answer(0, input);
+    //   if (!self._isInLoop) {
+    //     self._continueRunning();
+    //   } else {
+    //     /* We're still inside _loop(), so just return. */
+    //   }
+    // },
+
+    _pause: function() {
+        self._isWaitingForCallback = true;
+    },
+    
+    _resume: function() {
+        self._isWaitingForCallback = false;
+        if (!self._isInLoop) {
+          self._continueRunning();
+        } else {
+          /* We're still inside _loop(), so just return. */
+        }
+    },
+   
     _receiveLineInput: function(input) {
-      self._isWaitingForCallback = false;
-
-      // For now we'll say that a carriage return is the
-      // terminating character, because we don't actually support
-      // other terminating characters.
-      self._engine.answer(0, 13);
-
-      self._engine.answer(1, input);
-      if (!self._isInLoop) {
-        self._continueRunning();
-      } else {
-        /* We're still inside _loop(), so just return. */
-      }
+//        self._engine.answer(0, 13);
+        self._engine.answer(1, input);
+        self._resume();
     },
-
+    
     _receiveCharacterInput: function(input) {
-      self._isWaitingForCallback = false;
-      self._engine.answer(0, input);
-      if (!self._isInLoop) {
-        self._continueRunning();
-      } else {
-        /* We're still inside _loop(), so just return. */
-      }
+        self._engine.answer(0, input);
+        self._resume();
     },
-
-    _unWimpOut: function() {
+    
+/*    _unWimpOut: function() {
       self._isWaitingForCallback = false;
-      if (!self._isInLoop) {
-        self._continueRunning();
-      } else {
-        /* We're still inside _loop(), so just return. */
-      }
     },
-
+*/
     _loop: function() {
       if (self._isInLoop)
         throw new FatalError("Already in loop!");
@@ -185,27 +204,33 @@ function EngineRunner(engine, zui, logfunc) {
 
       switch (effect) {
       case GNUSTO_EFFECT_INPUT:
-        self._isWaitingForCallback = true;
+        self._pause();
         self._zui.onLineInput(self._receiveLineInput);
         break;
       case GNUSTO_EFFECT_INPUT_CHAR:
-        self._isWaitingForCallback = true;
+        self._pause();
         self._zui.onCharacterInput(self._receiveCharacterInput);
         break;
       case GNUSTO_EFFECT_SAVE:
+        self._pause();
         engine.saveGame();
-        if (self._zui.onSave(engine.saveGameData()))
-          engine.answer(0, 1);
-        else
-          engine.answer(0, 0);
+        self._zui.onSave(engine.saveGameData(), function(ok) {
+            if (ok)
+                engine.answer(0, 1);
+            else
+                engine.answer(0, 0);
+            self._resume();    
+        });
         break;
       case GNUSTO_EFFECT_RESTORE:
-        var saveGameData = self._zui.onRestore();
-        if (saveGameData) {
-          engine.loadSavedGame(saveGameData);
-        } else {
-          engine.answer(0, 0);
-        }
+        self._pause();
+        self._zui.onRestore(function(saveGameData) {
+            if (saveGameData)
+                engine.loadSavedGame(saveGameData);
+            else
+                engine.answer(0, 0);
+            self._resume();
+        });
         break;
       case GNUSTO_EFFECT_QUIT:
         self.stop();
@@ -216,8 +241,10 @@ function EngineRunner(engine, zui, logfunc) {
         self._zui.onRestart();
         break;
       case GNUSTO_EFFECT_WIMP_OUT:
-        self._isWaitingForCallback = true;
-        self._zui.onWimpOut(self._unWimpOut);
+      //        self._isWaitingForCallback = true;
+      //        self._zui.onWimpOut(self._unWimpOut);
+        self._pause();
+        self._zui.onWimpOut(self._resume);
         break;
       case GNUSTO_EFFECT_BREAKPOINT:
         throw new FatalError("Unimplemented effect: " + effect);

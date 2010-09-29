@@ -37,6 +37,8 @@ parchment.lib.ZUI = Object.subClass({
 			library: library,
 			engine: engine,
 			
+			_store: new Persist.Store("Parchment"),
+			
 			hidden_load_indicator: 0,
 			
 			bottom: $("#bottom"),
@@ -169,56 +171,98 @@ parchment.lib.ZUI = Object.subClass({
 	      self.text_input.getChar( callback );
 	    },
 
-    onSave: function(data) {
-      // TODO: Attempt to use other forms of local storage
-      // (e.g. Google Gears, HTML 5 database storage, etc) if
-      // available; if none are available, we should return false.
-      var self = this,
-
-      saveKey = this.library.url + '_saveData',
-      b64data = file.base64_encode(data);
-
-      if (window.globalStorage && location.href.slice(0, 5) != 'file:')
-        window.globalStorage[location.hostname][saveKey] = b64data;
+        _savedGameInput: function(callback) {
+ 	    	var self = this;
+           self.onLineInput(function(line) {
+                line = line.replace(/^\s*/, "").replace(/\s*$/, "");
+                line = line.toLowerCase();
+                if (line.length == 0)
+                    line = null;
+                else if (line != "url")
+                    line = self.library.url + "/" + line;
+                callback(line);
+            });
+        },
         
-      // Something very strange happens with local files on windows... perhaps it's because the url has the drive letter?
-	  // Anyway, we have to make our own location string
-	  location = location.protocol + '//' + location.host + location.pathname + location.search + '#' + b64data;
-      self._expectedHash = location.hash;
-      
-			self.onPrint("Your game has been saved to the URL. You may want " +
-				"to bookmark this page now; just reload it at any " +
-                   "time to restore your game from this point.\n");
-			return true;
-		},
+    onSave: function(data, callback) {
+      var self = this;
+      var b64data = file.base64_encode(data);
 
-onRestore: function()
-{
-	// TODO: Attempt to use other forms of local storage if
-	// available; if none are available, we should return null.
+      self.onPrint("Saved game name> ");
+      self._savedGameInput(function(filename) {
+          if (!filename) {
+              callback(false);
+          } else if (filename == "url") {
+              if (window.globalStorage && location.href.slice(0, 5) != 'file:') {
+                  var saveKey = self.library.url + '_saveData';
+                  window.globalStorage[location.hostname][saveKey] = b64data;
+              }
 
-	var b64data = null;
+              // Something very strange happens with local files on windows... perhaps it's because the url has the drive letter?
+              // Anyway, we have to make our own location string
+              location = location.protocol + '//' + location.host + location.pathname + location.search + '#' + b64data;
+              self._expectedHash = location.hash;
 
-	if (location.hash)
-		b64data = location.hash.slice(1);
+              self.onPrint("Your game has been saved to the URL. You may want " +
+              "to bookmark this page now; just reload it at any " +
+              "time to restore your game from this point.\n");
+              callback(true);
+          } else {
+              self._store.set(filename, b64data);
+              self._store.get(filename, function(ok, rdata) {
+                  rdata = new String(rdata);
+                  if (ok && (b64data == rdata)) {
+                      callback(true);
+                  } else {
+                      self._store.remove(filename);
+                      callback(false);
+                  }
+              });
+          }
+      });
+	},
 
-	if (!b64data && window.globalStorage)
-	{
-		var saveData = globalStorage[location.hostname][this.library.url + '_saveData'];
-		if (saveData)
-		{
-			b64data = saveData.value;
-			// See comment above in onSave
-			location = location.protocol + '//' + location.host + location.pathname + location.search + '#' + b64data;
-			this._expectedHash = location.hash;
-		}
-	}
-
-	if (b64data)
-		return file.base64_decode(b64data);
-	else
-		return null;
-},
+    onRestore: function(callback)
+    {
+    	var self = this;
+    	
+        self.onPrint("Saved game name> ");
+        self._savedGameInput(function(filename) {
+            if (!filename) {
+                callback(false);
+            } else if (filename == "url") {
+                if (!location.hash) {
+                    callback(null);
+                } else {
+                    var b64data = location.hash.slice(1);
+                	if (!b64data && window.globalStorage)
+                	{
+                		var saveData = globalStorage[location.hostname][self.library.url + '_saveData'];
+                		if (saveData)
+                		{
+                			b64data = saveData.value;
+                			location = location.protocol + '//' + location.host + location.pathname + location.search + '#' + b64data;
+                			self._expectedHash = location.hash;
+                		}
+                	}
+                	if (b64data)
+                		callback(file.base64_decode(b64data));
+                	else
+                		callback(null);
+                }
+            } else {
+                self._store.get(filename, function(ok, data) {
+                    data = new String(data);
+                    if (!ok) {
+                        self.onPrint("failure to retrieve\n");
+                        callback(null);
+                    } else {
+                        callback(file.base64_decode(data));
+                    }
+                });
+            }
+        });
+    },
 
 	    onQuit: function() {
 	      this._finalize();
